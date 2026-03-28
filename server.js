@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const SECRET_KEY = 'dailysync_secret_key';
 
 const MONGO_URI = 'mongodb+srv://dailysync-user:DjX7cs4r9liT5lkP@dailysync-db.uujpu9p.mongodb.net/dailysync?retryWrites=true&w=majority';
