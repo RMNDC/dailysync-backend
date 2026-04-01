@@ -11,6 +11,7 @@ const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 const SECRET_KEY = process.env.SECRET_KEY;
