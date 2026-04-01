@@ -196,20 +196,81 @@ app.post('/register', registerLimiter, async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
+app.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required.',
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Account not found.',
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account already verified.',
+      });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    user.verificationToken = token;
+    user.verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await user.save();
+
+    const verifyUrl = `${BASE_URL}/verify-email?token=${token}`;
+
+    try {
+      await transporter.sendMail({
+        from: EMAIL_USER,
+        to: normalizedEmail,
+        subject: 'DailySync - Verify your email',
+        html: `<h2>Verify your email</h2>
+               <a href="${verifyUrl}">Click here</a>`,
+      });
+    } catch (e) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send email.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Verification email sent.',
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
 
 app.get('/verify-email', async (req, res) => {
   try {
     const { token } = req.query;
+
     const user = await User.findOne({
       verificationToken: token,
       verificationTokenExpiry: { $gt: new Date() },
     });
 
     if (!user) {
-      return res.send(`<div style="font-family:Arial,sans-serif;text-align:center;padding:40px;">
-        <h2 style="color:#e53935;">❌ Invalid or expired link</h2>
-        <p>Please register again to get a new verification email.</p>
-      </div>`);
+      return res.redirect(
+        'https://dailysync-app.netlify.app/#/verify-email?status=invalid'
+      );
     }
 
     user.isVerified = true;
@@ -217,13 +278,14 @@ app.get('/verify-email', async (req, res) => {
     user.verificationTokenExpiry = undefined;
     await user.save();
 
-    return res.send(`<div style="font-family:Arial,sans-serif;text-align:center;padding:40px;background:#f5f7fa;">
-      <h2 style="color:#009688;">✅ Email Verified!</h2>
-      <p>Your account has been verified successfully!</p>
-      <p>You can now <a href="https://dailysync-app.netlify.app" style="color:#009688;font-weight:bold;">login to DailySync</a></p>
-    </div>`);
+    return res.redirect(
+      'https://dailysync-app.netlify.app/#/verify-email?status=success'
+    );
+
   } catch (err) {
-    return res.status(500).send('Something went wrong.');
+    return res.redirect(
+      'https://dailysync-app.netlify.app/#/verify-email?status=error'
+    );
   }
 });
 
