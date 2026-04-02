@@ -3,8 +3,8 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
 const dns = require('dns');
 
@@ -20,7 +20,7 @@ const BASE_URL = process.env.BASE_URL;
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 
-if (!SECRET_KEY || !MONGO_URI || !BASE_URL || !EMAIL_USER || !EMAIL_PASS) {
+if (!SECRET_KEY || !MONGO_URI || !BASE_URL) {
   throw new Error('Missing required environment variables');
 }
 
@@ -43,15 +43,7 @@ const registerLimiter = rateLimit({
   message: { success: false, message: 'Too many accounts created. Please try again after 1 hour.' },
 });
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 mongoose.connect(MONGO_URI, {
   serverSelectionTimeoutMS: 60000,
@@ -151,8 +143,8 @@ app.post('/register', registerLimiter, async (req, res) => {
       await existingUser.save();
 
       try {
-        await transporter.sendMail({
-          from: EMAIL_USER,
+        await resend.emails.send({
+          from: 'DailySync <onboarding@resend.dev>',
           to: normalizedEmail,
           subject: 'DailySync Verification Code',
           html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
@@ -183,8 +175,8 @@ app.post('/register', registerLimiter, async (req, res) => {
     await newUser.save();
 
     try {
-      await transporter.sendMail({
-        from: EMAIL_USER,
+      await resend.emails.send({
+        from: 'DailySync <onboarding@resend.dev>',
         to: normalizedEmail,
         subject: 'DailySync Verification Code',
         html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
@@ -219,8 +211,8 @@ app.post('/resend-verification', async (req, res) => {
     await user.save();
 
     try {
-      await transporter.sendMail({
-        from: EMAIL_USER,
+      await resend.emails.send({
+        from: 'DailySync <onboarding@resend.dev>',
         to: normalizedEmail,
         subject: 'DailySync Verification Code',
         html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
@@ -306,8 +298,8 @@ app.post('/forgot-password', async (req, res) => {
 
     const resetUrl = `${BASE_URL}/reset-password?token=${token}`;
     try {
-      await transporter.sendMail({
-        from: EMAIL_USER,
+      await resend.emails.send({
+        from: 'DailySync <onboarding@resend.dev>',
         to: normalizedEmail,
         subject: 'DailySync - Reset your password',
         html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
@@ -319,7 +311,7 @@ app.post('/forgot-password', async (req, res) => {
       });
     } catch (emailErr) {
       console.error('Email failed:', emailErr.message);
-    }
+    }}
 
     return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
   } catch (err) {
