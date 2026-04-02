@@ -4,11 +4,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
-const dns = require('dns');
-
-dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -17,8 +13,6 @@ const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.SECRET_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const BASE_URL = process.env.BASE_URL;
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
 
 if (!SECRET_KEY || !MONGO_URI || !BASE_URL) {
   throw new Error('Missing required environment variables');
@@ -42,8 +36,6 @@ const registerLimiter = rateLimit({
   max: 5,
   message: { success: false, message: 'Too many accounts created. Please try again after 1 hour.' },
 });
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 mongoose.connect(MONGO_URI, {
   serverSelectionTimeoutMS: 60000,
@@ -91,10 +83,6 @@ const GoalSchema = new mongoose.Schema({
 });
 const Goal = mongoose.model('Goal', GoalSchema);
 
-function generateVerificationCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -124,134 +112,17 @@ app.get('/', (req, res) => {
 app.post('/register', registerLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required.' });
-    }
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
 
     const normalizedEmail = email.trim().toLowerCase();
     const existingUser = await User.findOne({ email: normalizedEmail });
-
-    if (existingUser) {
-      if (existingUser.isVerified) {
-        return res.status(400).json({ success: false, message: 'Email already exists.' });
-      }
-
-      const verificationCode = generateVerificationCode();
-      existingUser.verificationCode = verificationCode;
-      existingUser.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
-      await existingUser.save();
-
-      try {
-        await resend.emails.send({
-          from: 'DailySync <onboarding@resend.dev>',
-          to: normalizedEmail,
-          subject: 'DailySync Verification Code',
-          html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-            <h2 style="color:#009688;">DailySync Verification Code</h2>
-            <p>Use this 6-digit code to verify your account:</p>
-            <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-            <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-          </div>`,
-        });
-      } catch (emailErr) {
-        console.error('Email failed:', emailErr.message);
-      }
-
-      return res.json({ success: true, requiresVerification: true, message: 'Verification code sent to your email.' });
-    }
+    if (existingUser) return res.status(400).json({ success: false, message: 'Email already exists.' });
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const verificationCode = generateVerificationCode();
-
-    const newUser = new User({
-      email: normalizedEmail,
-      password: hashedPassword,
-      isVerified: false,
-      verificationCode,
-      verificationCodeExpiry: new Date(Date.now() + 10 * 60 * 1000),
-    });
-
+    const newUser = new User({ email: normalizedEmail, password: hashedPassword, isVerified: true });
     await newUser.save();
 
-    try {
-      await resend.emails.send({
-        from: 'DailySync <onboarding@resend.dev>',
-        to: normalizedEmail,
-        subject: 'DailySync Verification Code',
-        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-          <h2 style="color:#009688;">Welcome to DailySync! 🌱</h2>
-          <p>Use this 6-digit code to verify your account:</p>
-          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-        </div>`,
-      });
-    } catch (emailErr) {
-      console.error('Email failed:', emailErr.message);
-    }
-
-    return res.json({ success: true, requiresVerification: true, message: 'Account created. Enter the verification code sent to your email.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.post('/resend-verification', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ success: false, message: 'Email is required.' });
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = await User.findOne({ email: normalizedEmail });
-    if (!user) return res.status(404).json({ success: false, message: 'Account not found.' });
-    if (user.isVerified) return res.status(400).json({ success: false, message: 'Account already verified.' });
-
-    const verificationCode = generateVerificationCode();
-    user.verificationCode = verificationCode;
-    user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
-
-    try {
-      await resend.emails.send({
-        from: 'DailySync <onboarding@resend.dev>',
-        to: normalizedEmail,
-        subject: 'DailySync Verification Code',
-        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-          <h2 style="color:#009688;">New Verification Code</h2>
-          <p>Use this 6-digit code to verify your account:</p>
-          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-        </div>`,
-      });
-    } catch (emailErr) {
-      console.error('Email failed:', emailErr.message);
-    }
-
-    return res.json({ success: true, message: 'New verification code sent.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.post('/verify-code', async (req, res) => {
-  try {
-    const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ success: false, message: 'Email and code are required.' });
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = await User.findOne({
-      email: normalizedEmail,
-      verificationCode: code,
-      verificationCodeExpiry: { $gt: new Date() },
-    });
-
-    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
-
-    user.isVerified = true;
-    user.verificationCode = undefined;
-    user.verificationCodeExpiry = undefined;
-    await user.save();
-
-    return res.json({ success: true, message: 'Email verified successfully. You can now log in.' });
+    return res.json({ success: true, message: 'Account created successfully!' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -268,7 +139,6 @@ app.post('/login', loginLimiter, async (req, res) => {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    if (!user.isVerified) return res.status(401).json({ success: false, message: 'Please verify your email before logging in.' });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid email or password.' });
