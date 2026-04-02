@@ -514,4 +514,40 @@ app.delete('/goals/:id', verifyToken, async (req, res) => {
   }
 });
 
+app.get('/profile', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('email username isVerified');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+    return res.json({ success: true, user });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/profile', verifyToken, async (req, res) => {
+  try {
+    const { username } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { username: (username || '').trim() },
+      { new: true }
+    ).select('email username isVerified');
+    return res.json({ success: true, message: 'Profile updated successfully.', user });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/daily-quote', async (req, res) => {
+  const quotes = [
+    'Small steps every day build big results.',
+    'Progress, not perfection.',
+    'Your future is created by what you do today.',
+    'Stay consistent, even when motivation fades.',
+    'Discipline turns goals into reality.',
+  ];
+  const dayIndex = new Date().getDate() % quotes.length;
+  return res.json({ success: true, quote: quotes[dayIndex] });
+});
+
 app.listen(PORT, () => console.log(`DailySync backend running on port ${PORT}`));
