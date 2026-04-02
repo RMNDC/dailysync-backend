@@ -150,17 +150,21 @@ app.post('/register', registerLimiter, async (req, res) => {
       existingUser.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
       await existingUser.save();
 
-      await transporter.sendMail({
-        from: EMAIL_USER,
-        to: normalizedEmail,
-        subject: 'DailySync Verification Code',
-        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-          <h2 style="color:#009688;">DailySync Verification Code</h2>
-          <p>Use this 6-digit code to verify your account:</p>
-          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-        </div>`,
-      });
+      try {
+        await transporter.sendMail({
+          from: EMAIL_USER,
+          to: normalizedEmail,
+          subject: 'DailySync Verification Code',
+          html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+            <h2 style="color:#009688;">DailySync Verification Code</h2>
+            <p>Use this 6-digit code to verify your account:</p>
+            <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+            <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
+          </div>`,
+        });
+      } catch (emailErr) {
+        console.error('Email failed:', emailErr.message);
+      }
 
       return res.json({ success: true, requiresVerification: true, message: 'Verification code sent to your email.' });
     }
@@ -178,17 +182,21 @@ app.post('/register', registerLimiter, async (req, res) => {
 
     await newUser.save();
 
-    await transporter.sendMail({
-      from: EMAIL_USER,
-      to: normalizedEmail,
-      subject: 'DailySync Verification Code',
-      html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-        <h2 style="color:#009688;">Welcome to DailySync! 🌱</h2>
-        <p>Use this 6-digit code to verify your account:</p>
-        <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-        <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-      </div>`,
-    });
+    try {
+      await transporter.sendMail({
+        from: EMAIL_USER,
+        to: normalizedEmail,
+        subject: 'DailySync Verification Code',
+        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+          <h2 style="color:#009688;">Welcome to DailySync! 🌱</h2>
+          <p>Use this 6-digit code to verify your account:</p>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
+        </div>`,
+      });
+    } catch (emailErr) {
+      console.error('Email failed:', emailErr.message);
+    }
 
     return res.json({ success: true, requiresVerification: true, message: 'Account created. Enter the verification code sent to your email.' });
   } catch (err) {
@@ -210,17 +218,21 @@ app.post('/resend-verification', async (req, res) => {
     user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    await transporter.sendMail({
-      from: EMAIL_USER,
-      to: normalizedEmail,
-      subject: 'DailySync Verification Code',
-      html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-        <h2 style="color:#009688;">New Verification Code</h2>
-        <p>Use this 6-digit code to verify your account:</p>
-        <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
-        <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
-      </div>`,
-    });
+    try {
+      await transporter.sendMail({
+        from: EMAIL_USER,
+        to: normalizedEmail,
+        subject: 'DailySync Verification Code',
+        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+          <h2 style="color:#009688;">New Verification Code</h2>
+          <p>Use this 6-digit code to verify your account:</p>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
+        </div>`,
+      });
+    } catch (emailErr) {
+      console.error('Email failed:', emailErr.message);
+    }
 
     return res.json({ success: true, message: 'New verification code sent.' });
   } catch (err) {
@@ -293,17 +305,21 @@ app.post('/forgot-password', async (req, res) => {
     await user.save();
 
     const resetUrl = `${BASE_URL}/reset-password?token=${token}`;
-    await transporter.sendMail({
-      from: EMAIL_USER,
-      to: normalizedEmail,
-      subject: 'DailySync - Reset your password',
-      html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-        <h2 style="color:#009688;">Reset Your Password 🔑</h2>
-        <p>You requested a password reset. Click below to set a new password.</p>
-        <a href="${resetUrl}" style="display:inline-block;background:#009688;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset Password</a>
-        <p style="color:#999;font-size:12px;margin-top:20px;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
-      </div>`,
-    });
+    try {
+      await transporter.sendMail({
+        from: EMAIL_USER,
+        to: normalizedEmail,
+        subject: 'DailySync - Reset your password',
+        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+          <h2 style="color:#009688;">Reset Your Password 🔑</h2>
+          <p>You requested a password reset. Click below to set a new password.</p>
+          <a href="${resetUrl}" style="display:inline-block;background:#009688;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset Password</a>
+          <p style="color:#999;font-size:12px;margin-top:20px;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+        </div>`,
+      });
+    } catch (emailErr) {
+      console.error('Email failed:', emailErr.message);
+    }
 
     return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
   } catch (err) {
