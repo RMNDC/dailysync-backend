@@ -48,6 +48,7 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, trim: true, lowercase: true },
   password: { type: String, required: true },
   username: { type: String, default: '' },
+  emoji: { type: String, default: '😊' },
   isVerified: { type: Boolean, default: false },
   verificationCode: { type: String },
   verificationCodeExpiry: { type: Date },
@@ -119,7 +120,7 @@ app.post('/register', registerLimiter, async (req, res) => {
     if (existingUser) return res.status(400).json({ success: false, message: 'Email already exists.' });
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const newUser = new User({ email: normalizedEmail, password: hashedPassword, isVerified: true });
+    const newUser = new User({ email: normalizedEmail, password: hashedPassword, username: req.body.username || '', isVerified: true });
     await newUser.save();
 
     return res.json({ success: true, message: 'Account created successfully!' });
@@ -343,7 +344,7 @@ app.delete('/goals/:id', verifyToken, async (req, res) => {
 
 app.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('email username isVerified');
+    const user = await User.findById(req.user.id).select('email username emoji isVerified');
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     return res.json({ success: true, user });
   } catch (err) {
@@ -353,12 +354,12 @@ app.get('/profile', verifyToken, async (req, res) => {
 
 app.put('/profile', verifyToken, async (req, res) => {
   try {
-    const { username } = req.body;
+    const { username, emoji } = req.body;
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      { username: (username || '').trim() },
+      { username: (username || '').trim(), ...(emoji && { emoji }) },
       { new: true }
-    ).select('email username isVerified');
+    ).select('email username emoji isVerified');
     return res.json({ success: true, message: 'Profile updated successfully.', user });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
