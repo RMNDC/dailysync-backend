@@ -65,8 +65,8 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true },
   username: { type: String, default: '' },
   isVerified: { type: Boolean, default: false },
-  verificationToken: { type: String },
-  verificationTokenExpiry: { type: Date },
+  verificationCode: { type: String },
+  verificationCodeExpiry: { type: Date },
   resetPasswordToken: { type: String },
   resetPasswordExpiry: { type: Date },
 });
@@ -98,6 +98,10 @@ const GoalSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 const Goal = mongoose.model('Goal', GoalSchema);
+
+function generateVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -137,61 +141,56 @@ app.post('/register', registerLimiter, async (req, res) => {
     const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
-      if (!existingUser.isVerified) {
-        const token = crypto.randomBytes(32).toString('hex');
-        existingUser.verificationToken = token;
-        existingUser.verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        await existingUser.save();
-
-        const verifyUrl = `${BASE_URL}/verify-email?token=${token}`;
-        await transporter.sendMail({
-          from: EMAIL_USER,
-          to: normalizedEmail,
-          subject: 'DailySync - Verify your email',
-          html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
-            <h2 style="color:#009688;">Welcome to DailySync! 🌱</h2>
-            <p>Please verify your email address to complete your registration.</p>
-            <a href="${verifyUrl}" style="display:inline-block;background:#009688;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a>
-            <p style="color:#999;font-size:12px;margin-top:20px;">This link expires in 24 hours.</p>
-          </div>`,
-        });
-
-        return res.status(400).json({
-          success: false,
-          message: 'Email already registered but not verified. A new verification email has been sent!',
-        });
+      if (existingUser.isVerified) {
+        return res.status(400).json({ success: false, message: 'Email already exists.' });
       }
 
-      return res.status(400).json({ success: false, message: 'Email already exists.' });
+      const verificationCode = generateVerificationCode();
+      existingUser.verificationCode = verificationCode;
+      existingUser.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
+      await existingUser.save();
+
+      await transporter.sendMail({
+        from: EMAIL_USER,
+        to: normalizedEmail,
+        subject: 'DailySync Verification Code',
+        html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+          <h2 style="color:#009688;">DailySync Verification Code</h2>
+          <p>Use this 6-digit code to verify your account:</p>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+          <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
+        </div>`,
+      });
+
+      return res.json({ success: true, requiresVerification: true, message: 'Verification code sent to your email.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const token = crypto.randomBytes(32).toString('hex');
+    const verificationCode = generateVerificationCode();
 
     const newUser = new User({
       email: normalizedEmail,
       password: hashedPassword,
       isVerified: false,
-      verificationToken: token,
-      verificationTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      verificationCode,
+      verificationCodeExpiry: new Date(Date.now() + 10 * 60 * 1000),
     });
 
     await newUser.save();
 
-    const verifyUrl = `${BASE_URL}/verify-email?token=${token}`;
     await transporter.sendMail({
       from: EMAIL_USER,
       to: normalizedEmail,
-      subject: 'DailySync - Verify your email',
+      subject: 'DailySync Verification Code',
       html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
         <h2 style="color:#009688;">Welcome to DailySync! 🌱</h2>
-        <p>Hi! Thanks for signing up. Please verify your email to get started.</p>
-        <a href="${verifyUrl}" style="display:inline-block;background:#009688;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a>
-        <p style="color:#999;font-size:12px;margin-top:20px;">This link expires in 24 hours. If you didn't sign up, ignore this email.</p>
+        <p>Use this 6-digit code to verify your account:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+        <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
       </div>`,
     });
 
-    return res.json({ success: true, message: 'Account created! Please check your email to verify your account.' });
+    return res.json({ success: true, requiresVerification: true, message: 'Account created. Enter the verification code sent to your email.' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -199,93 +198,58 @@ app.post('/register', registerLimiter, async (req, res) => {
 app.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email is required.',
-      });
-    }
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required.' });
 
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
+    if (!user) return res.status(404).json({ success: false, message: 'Account not found.' });
+    if (user.isVerified) return res.status(400).json({ success: false, message: 'Account already verified.' });
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Account not found.',
-      });
-    }
-
-    if (user.isVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Account already verified.',
-      });
-    }
-
-    const token = crypto.randomBytes(32).toString('hex');
-    user.verificationToken = token;
-    user.verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationCode = generateVerificationCode();
+    user.verificationCode = verificationCode;
+    user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    const verifyUrl = `${BASE_URL}/verify-email?token=${token}`;
-
-    try {
-      await transporter.sendMail({
-        from: EMAIL_USER,
-        to: normalizedEmail,
-        subject: 'DailySync - Verify your email',
-        html: `<h2>Verify your email</h2>
-               <a href="${verifyUrl}">Click here</a>`,
-      });
-    } catch (e) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send email.',
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: 'Verification email sent.',
+    await transporter.sendMail({
+      from: EMAIL_USER,
+      to: normalizedEmail,
+      subject: 'DailySync Verification Code',
+      html: `<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;background:#f5f7fa;border-radius:12px;">
+        <h2 style="color:#009688;">New Verification Code</h2>
+        <p>Use this 6-digit code to verify your account:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#009688;margin:20px 0;">${verificationCode}</div>
+        <p style="color:#999;font-size:12px;">This code expires in 10 minutes.</p>
+      </div>`,
     });
+
+    return res.json({ success: true, message: 'New verification code sent.' });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-app.get('/verify-email', async (req, res) => {
+app.post('/verify-code', async (req, res) => {
   try {
-    const { token } = req.query;
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ success: false, message: 'Email and code are required.' });
 
+    const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({
-      verificationToken: token,
-      verificationTokenExpiry: { $gt: new Date() },
+      email: normalizedEmail,
+      verificationCode: code,
+      verificationCodeExpiry: { $gt: new Date() },
     });
 
-    if (!user) {
-      return res.redirect(
-        'https://dailysync-app.netlify.app/#/verify-email?status=invalid'
-      );
-    }
+    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
 
     user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationTokenExpiry = undefined;
+    user.verificationCode = undefined;
+    user.verificationCodeExpiry = undefined;
     await user.save();
 
-    return res.redirect(
-      'https://dailysync-app.netlify.app/#/verify-email?status=success'
-    );
-
+    return res.json({ success: true, message: 'Email verified successfully. You can now log in.' });
   } catch (err) {
-    return res.redirect(
-      'https://dailysync-app.netlify.app/#/verify-email?status=error'
-    );
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
