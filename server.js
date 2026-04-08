@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
@@ -8,6 +9,9 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 const PORT = process.env.PORT || 3000;
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -28,12 +32,16 @@ app.use(express.json());
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { success: false, message: 'Too many login attempts. Please try again after 15 minutes.' },
 });
 
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { success: false, message: 'Too many accounts created. Please try again after 1 hour.' },
 });
 
@@ -112,8 +120,11 @@ app.get('/', (req, res) => {
 
 app.post('/register', registerLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, username } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
+    if (typeof email !== 'string' || typeof password !== 'string') return res.status(400).json({ success: false, message: 'Invalid input.' });
+    if (password.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+    if (password.length > 128) return res.status(400).json({ success: false, message: 'Password too long.' });
 
     const normalizedEmail = email.trim().toLowerCase();
     const existingUser = await User.findOne({ email: normalizedEmail });
@@ -132,10 +143,9 @@ app.post('/register', registerLimiter, async (req, res) => {
 app.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required.' });
-    }
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
+    if (typeof email !== 'string' || typeof password !== 'string') return res.status(400).json({ success: false, message: 'Invalid input.' });
+    if (password.length > 128) return res.status(400).json({ success: false, message: 'Invalid credentials.' });
 
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
