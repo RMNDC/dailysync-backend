@@ -65,17 +65,13 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// ✅ UPDATED: added `category` field to HabitSchema
+// ── Habits (with category from previous update) ───────────────────────────────
 const VALID_HABIT_CATEGORIES = ['Health', 'Fitness', 'Study', 'Spiritual', 'Work', 'Personal'];
 
 const HabitSchema = new mongoose.Schema({
   userId: String,
   name: String,
-  category: {
-    type: String,
-    enum: VALID_HABIT_CATEGORIES,
-    default: 'Health',
-  },
+  category: { type: String, enum: VALID_HABIT_CATEGORIES, default: 'Health' },
   done: Boolean,
   streak: { type: Number, default: 0 },
   lastCompleted: { type: Date },
@@ -83,6 +79,7 @@ const HabitSchema = new mongoose.Schema({
 });
 const Habit = mongoose.model('Habit', HabitSchema);
 
+// ── Moods ─────────────────────────────────────────────────────────────────────
 const MoodSchema = new mongoose.Schema({
   userId: String,
   mood: String,
@@ -92,24 +89,26 @@ const MoodSchema = new mongoose.Schema({
 });
 const Mood = mongoose.model('Mood', MoodSchema);
 
+// ── Goals (UPDATED: added category, priority, dueDate) ────────────────────────
+const VALID_GOAL_CATEGORIES = ['Personal', 'Career', 'Health', 'Finance', 'Learning', 'Other'];
+const VALID_GOAL_PRIORITIES  = ['High', 'Medium', 'Low'];
+
 const GoalSchema = new mongoose.Schema({
   userId: String,
   name: String,
-  done: Boolean,
+  done: { type: Boolean, default: false },
+  category: { type: String, enum: VALID_GOAL_CATEGORIES, default: 'Personal' },
+  priority: { type: String, enum: VALID_GOAL_PRIORITIES, default: 'Medium' },
+  dueDate: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 const Goal = mongoose.model('Goal', GoalSchema);
 
+// ── Auth middleware ───────────────────────────────────────────────────────────
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ success: false, message: 'No token provided.' });
-  }
-
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.split(' ')[1]
-    : authHeader;
-
+  if (!authHeader) return res.status(401).json({ success: false, message: 'No token provided.' });
+  const token = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
     req.user = decoded;
@@ -119,6 +118,7 @@ function verifyToken(req, res, next) {
   }
 }
 
+// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   res.json({
     message: 'DailySync backend is running!',
@@ -126,9 +126,10 @@ app.get('/', (req, res) => {
   });
 });
 
+// ── Auth routes ───────────────────────────────────────────────────────────────
 app.post('/register', registerLimiter, async (req, res) => {
   try {
-    const { email, password, username } = req.body;
+    const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
     if (typeof email !== 'string' || typeof password !== 'string') return res.status(400).json({ success: false, message: 'Invalid input.' });
     if (password.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
@@ -141,7 +142,6 @@ app.post('/register', registerLimiter, async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 12);
     const newUser = new User({ email: normalizedEmail, password: hashedPassword, username: req.body.username || '', isVerified: true });
     await newUser.save();
-
     return res.json({ success: true, message: 'Account created successfully!' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -172,10 +172,7 @@ app.post('/login', loginLimiter, async (req, res) => {
 app.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Email is required.' });
-    }
-
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required.' });
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
@@ -186,7 +183,6 @@ app.post('/forgot-password', async (req, res) => {
     await user.save();
 
     const resetUrl = `${BASE_URL}/reset-password?token=${token}`;
-
     return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -211,19 +207,11 @@ app.get('/reset-password', async (req, res) => {
 app.post('/reset-password', express.urlencoded({ extended: true }), async (req, res) => {
   try {
     const { token, password, confirmPassword } = req.body;
-
     if (password !== confirmPassword) {
       return res.send('<p style="color:red;font-family:Arial;text-align:center;">Passwords do not match. <a href="javascript:history.back()">Go back</a></p>');
     }
-
-    const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpiry: { $gt: new Date() },
-    });
-
-    if (!user) {
-      return res.send('<p style="color:red;font-family:Arial;text-align:center;">Invalid or expired reset link.</p>');
-    }
+    const user = await User.findOne({ resetPasswordToken: token, resetPasswordExpiry: { $gt: new Date() } });
+    if (!user) return res.send('<p style="color:red;font-family:Arial;text-align:center;">Invalid or expired reset link.</p>');
 
     user.password = await bcrypt.hash(password, 12);
     user.resetPasswordToken = undefined;
@@ -240,7 +228,7 @@ app.post('/reset-password', express.urlencoded({ extended: true }), async (req, 
   }
 });
 
-// ✅ UPDATED: GET /habits — unchanged
+// ── Habit routes ──────────────────────────────────────────────────────────────
 app.get('/habits', verifyToken, async (req, res) => {
   try {
     const habits = await Habit.find({ userId: req.user.id });
@@ -250,20 +238,12 @@ app.get('/habits', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ UPDATED: POST /habits — now saves `category`
 app.post('/habits', verifyToken, async (req, res) => {
   try {
     const { name, category } = req.body;
-    if (!name || name.trim() === '') {
-      return res.status(400).json({ success: false, message: 'Habit name is required.' });
-    }
+    if (!name || name.trim() === '') return res.status(400).json({ success: false, message: 'Habit name is required.' });
     const resolvedCategory = VALID_HABIT_CATEGORIES.includes(category) ? category : 'Health';
-    const habit = new Habit({
-      userId: req.user.id,
-      name: name.trim(),
-      category: resolvedCategory,
-      done: false,
-    });
+    const habit = new Habit({ userId: req.user.id, name: name.trim(), category: resolvedCategory, done: false });
     await habit.save();
     return res.json({ success: true, habit });
   } catch (err) {
@@ -271,7 +251,6 @@ app.post('/habits', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ UPDATED: PUT /habits/:id — unchanged logic, category preserved automatically
 app.put('/habits/:id', verifyToken, async (req, res) => {
   try {
     const habit = await Habit.findById(req.params.id);
@@ -294,21 +273,15 @@ app.put('/habits/:id', verifyToken, async (req, res) => {
 
     const updated = await Habit.findByIdAndUpdate(
       req.params.id,
-      {
-        done: newDone,
-        streak: newDone ? newStreak : habit.streak,
-        lastCompleted: newDone ? new Date() : habit.lastCompleted,
-      },
+      { done: newDone, streak: newDone ? newStreak : habit.streak, lastCompleted: newDone ? new Date() : habit.lastCompleted },
       { new: true }
     );
-
     return res.json({ success: true, habit: updated });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ UPDATED: DELETE /habits/:id — unchanged
 app.delete('/habits/:id', verifyToken, async (req, res) => {
   try {
     await Habit.findByIdAndDelete(req.params.id);
@@ -318,6 +291,7 @@ app.delete('/habits/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ── Mood routes ───────────────────────────────────────────────────────────────
 app.get('/moods', verifyToken, async (req, res) => {
   try {
     const moods = await Mood.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -337,18 +311,33 @@ app.post('/moods', verifyToken, async (req, res) => {
   }
 });
 
+// ── Goal routes (UPDATED) ─────────────────────────────────────────────────────
 app.get('/goals', verifyToken, async (req, res) => {
   try {
-    const goals = await Goal.find({ userId: req.user.id });
+    const goals = await Goal.find({ userId: req.user.id }).sort({ createdAt: -1 });
     return res.json({ success: true, goals });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
+// ✅ Now saves category, priority, dueDate
 app.post('/goals', verifyToken, async (req, res) => {
   try {
-    const goal = new Goal({ userId: req.user.id, name: req.body.name, done: false });
+    const { name, category, priority, dueDate } = req.body;
+    if (!name || name.trim() === '') return res.status(400).json({ success: false, message: 'Goal name is required.' });
+
+    const resolvedCategory = VALID_GOAL_CATEGORIES.includes(category) ? category : 'Personal';
+    const resolvedPriority  = VALID_GOAL_PRIORITIES.includes(priority)  ? priority  : 'Medium';
+
+    const goal = new Goal({
+      userId: req.user.id,
+      name: name.trim(),
+      done: false,
+      category: resolvedCategory,
+      priority: resolvedPriority,
+      dueDate: dueDate ? new Date(dueDate) : null,
+    });
     await goal.save();
     return res.json({ success: true, goal });
   } catch (err) {
@@ -374,6 +363,7 @@ app.delete('/goals/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ── Profile routes ────────────────────────────────────────────────────────────
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('email username emoji isVerified');
@@ -398,6 +388,7 @@ app.put('/profile', verifyToken, async (req, res) => {
   }
 });
 
+// ── Daily quote ───────────────────────────────────────────────────────────────
 app.get('/daily-quote', async (req, res) => {
   const quotes = [
     'Small steps every day build big results.',
