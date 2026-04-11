@@ -65,9 +65,17 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
+// ✅ UPDATED: added `category` field to HabitSchema
+const VALID_HABIT_CATEGORIES = ['Health', 'Fitness', 'Study', 'Spiritual', 'Work', 'Personal'];
+
 const HabitSchema = new mongoose.Schema({
   userId: String,
   name: String,
+  category: {
+    type: String,
+    enum: VALID_HABIT_CATEGORIES,
+    default: 'Health',
+  },
   done: Boolean,
   streak: { type: Number, default: 0 },
   lastCompleted: { type: Date },
@@ -232,6 +240,7 @@ app.post('/reset-password', express.urlencoded({ extended: true }), async (req, 
   }
 });
 
+// ✅ UPDATED: GET /habits — unchanged
 app.get('/habits', verifyToken, async (req, res) => {
   try {
     const habits = await Habit.find({ userId: req.user.id });
@@ -241,9 +250,20 @@ app.get('/habits', verifyToken, async (req, res) => {
   }
 });
 
+// ✅ UPDATED: POST /habits — now saves `category`
 app.post('/habits', verifyToken, async (req, res) => {
   try {
-    const habit = new Habit({ userId: req.user.id, name: req.body.name, done: false });
+    const { name, category } = req.body;
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Habit name is required.' });
+    }
+    const resolvedCategory = VALID_HABIT_CATEGORIES.includes(category) ? category : 'Health';
+    const habit = new Habit({
+      userId: req.user.id,
+      name: name.trim(),
+      category: resolvedCategory,
+      done: false,
+    });
     await habit.save();
     return res.json({ success: true, habit });
   } catch (err) {
@@ -251,6 +271,7 @@ app.post('/habits', verifyToken, async (req, res) => {
   }
 });
 
+// ✅ UPDATED: PUT /habits/:id — unchanged logic, category preserved automatically
 app.put('/habits/:id', verifyToken, async (req, res) => {
   try {
     const habit = await Habit.findById(req.params.id);
@@ -287,6 +308,7 @@ app.put('/habits/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ✅ UPDATED: DELETE /habits/:id — unchanged
 app.delete('/habits/:id', verifyToken, async (req, res) => {
   try {
     await Habit.findByIdAndDelete(req.params.id);
