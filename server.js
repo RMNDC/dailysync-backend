@@ -311,6 +311,16 @@ app.post('/moods', verifyToken, async (req, res) => {
   }
 });
 
+app.delete('/moods/:id', verifyToken, async (req, res) => {
+  try {
+    await Mood.findByIdAndDelete(req.params.id);
+    return res.json({ success: true, message: 'Mood deleted!' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 // ── Goal routes (UPDATED) ─────────────────────────────────────────────────────
 app.get('/goals', verifyToken, async (req, res) => {
   try {
