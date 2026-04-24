@@ -27,7 +27,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // increased for base64 images
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -52,11 +52,13 @@ mongoose.connect(MONGO_URI, {
 }).then(() => console.log('Connected to MongoDB!'))
   .catch((err) => console.log('Database connection error:', err.message));
 
+// ── Schemas ───────────────────────────────────────────────────────────────────
+
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, trim: true, lowercase: true },
   password: { type: String, required: true },
   username: { type: String, default: '' },
-  emoji: { type: String, default: '😊' },
+  profileImage: { type: String, default: null }, // base64 string
   isVerified: { type: Boolean, default: false },
   verificationCode: { type: String },
   verificationCodeExpiry: { type: Date },
@@ -65,7 +67,6 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// ── Habits (with category from previous update) ───────────────────────────────
 const VALID_HABIT_CATEGORIES = ['Health', 'Fitness', 'Study', 'Spiritual', 'Work', 'Personal'];
 
 const HabitSchema = new mongoose.Schema({
@@ -79,7 +80,6 @@ const HabitSchema = new mongoose.Schema({
 });
 const Habit = mongoose.model('Habit', HabitSchema);
 
-// ── Moods ─────────────────────────────────────────────────────────────────────
 const MoodSchema = new mongoose.Schema({
   userId: String,
   mood: String,
@@ -89,7 +89,6 @@ const MoodSchema = new mongoose.Schema({
 });
 const Mood = mongoose.model('Mood', MoodSchema);
 
-// ── Goals (UPDATED: added category, priority, dueDate) ────────────────────────
 const VALID_GOAL_CATEGORIES = ['Personal', 'Career', 'Health', 'Finance', 'Learning', 'Other'];
 const VALID_GOAL_PRIORITIES  = ['High', 'Medium', 'Low'];
 
@@ -105,6 +104,7 @@ const GoalSchema = new mongoose.Schema({
 const Goal = mongoose.model('Goal', GoalSchema);
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
+
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ success: false, message: 'No token provided.' });
@@ -119,6 +119,7 @@ function verifyToken(req, res, next) {
 }
 
 // ── Health check ──────────────────────────────────────────────────────────────
+
 app.get('/', (req, res) => {
   res.json({
     message: 'DailySync backend is running!',
@@ -127,6 +128,7 @@ app.get('/', (req, res) => {
 });
 
 // ── Auth routes ───────────────────────────────────────────────────────────────
+
 app.post('/register', registerLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -140,7 +142,12 @@ app.post('/register', registerLimiter, async (req, res) => {
     if (existingUser) return res.status(400).json({ success: false, message: 'Email already exists.' });
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const newUser = new User({ email: normalizedEmail, password: hashedPassword, username: req.body.username || '', isVerified: true });
+    const newUser = new User({
+      email: normalizedEmail,
+      password: hashedPassword,
+      username: req.body.username || '',
+      isVerified: true,
+    });
     await newUser.save();
     return res.json({ success: true, message: 'Account created successfully!' });
   } catch (err) {
@@ -229,6 +236,7 @@ app.post('/reset-password', express.urlencoded({ extended: true }), async (req, 
 });
 
 // ── Habit routes ──────────────────────────────────────────────────────────────
+
 app.get('/habits', verifyToken, async (req, res) => {
   try {
     const habits = await Habit.find({ userId: req.user.id });
@@ -292,6 +300,7 @@ app.delete('/habits/:id', verifyToken, async (req, res) => {
 });
 
 // ── Mood routes ───────────────────────────────────────────────────────────────
+
 app.get('/moods', verifyToken, async (req, res) => {
   try {
     const moods = await Mood.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -320,8 +329,8 @@ app.delete('/moods/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ── Goal routes ───────────────────────────────────────────────────────────────
 
-// ── Goal routes (UPDATED) ─────────────────────────────────────────────────────
 app.get('/goals', verifyToken, async (req, res) => {
   try {
     const goals = await Goal.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -331,7 +340,6 @@ app.get('/goals', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Now saves category, priority, dueDate
 app.post('/goals', verifyToken, async (req, res) => {
   try {
     const { name, category, priority, dueDate } = req.body;
@@ -374,9 +382,10 @@ app.delete('/goals/:id', verifyToken, async (req, res) => {
 });
 
 // ── Profile routes ────────────────────────────────────────────────────────────
+
 app.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('email username emoji isVerified');
+    const user = await User.findById(req.user.id).select('email username profileImage isVerified');
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     return res.json({ success: true, user });
   } catch (err) {
@@ -386,12 +395,21 @@ app.get('/profile', verifyToken, async (req, res) => {
 
 app.put('/profile', verifyToken, async (req, res) => {
   try {
-    const { username, emoji } = req.body;
+    const { username, profileImage } = req.body;
+
+    if (profileImage && profileImage.length > 7 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Image too large. Please use a smaller photo.' });
+    }
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      { username: (username || '').trim(), ...(emoji && { emoji }) },
+      {
+        username: (username || '').trim(),
+        ...(profileImage !== undefined && { profileImage }),
+      },
       { new: true }
-    ).select('email username emoji isVerified');
+    ).select('email username profileImage isVerified');
+
     return res.json({ success: true, message: 'Profile updated successfully.', user });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -399,6 +417,7 @@ app.put('/profile', verifyToken, async (req, res) => {
 });
 
 // ── Daily quote ───────────────────────────────────────────────────────────────
+
 app.get('/daily-quote', async (req, res) => {
   const quotes = [
     'Small steps every day build big results.',
